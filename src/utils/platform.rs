@@ -1,4 +1,4 @@
-use std;
+use ignore::DirEntry;
 
 fn get_block_size() -> u64 {
     // All os specific implementations of MetatdataExt seem to define a block as 512 bytes
@@ -8,7 +8,7 @@ fn get_block_size() -> u64 {
 
 #[cfg(target_os = "linux")]
 pub fn get_metadata(
-    d: &std::fs::DirEntry,
+    d: &DirEntry,
     use_apparent_size: bool,
 ) -> Option<(u64, Option<(u64, u64)>)> {
     use std::os::linux::fs::MetadataExt;
@@ -27,7 +27,7 @@ pub fn get_metadata(
 
 #[cfg(target_os = "unix")]
 pub fn get_metadata(
-    d: &std::fs::DirEntry,
+    d: &DirEntry,
     use_apparent_size: bool,
 ) -> Option<(u64, Option<(u64, u64)>)> {
     use std::os::unix::fs::MetadataExt;
@@ -46,7 +46,7 @@ pub fn get_metadata(
 
 #[cfg(target_os = "macos")]
 pub fn get_metadata(
-    d: &std::fs::DirEntry,
+    d: &DirEntry,
     use_apparent_size: bool,
 ) -> Option<(u64, Option<(u64, u64)>)> {
     use std::os::macos::fs::MetadataExt;
@@ -64,7 +64,7 @@ pub fn get_metadata(
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "unix", target_os = "macos")))]
-pub fn get_metadata(d: &std::fs::DirEntry, _apparent: bool) -> Option<(u64, Option<(u64, u64)>)> {
+pub fn get_metadata(d: &DirEntry, _apparent: bool) -> Option<(u64, Option<(u64, u64)>)> {
     match d.metadata().ok() {
         Some(md) => Some((md.len(), None)),
         None => None,

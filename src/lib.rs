@@ -8,7 +8,7 @@ pub struct Node {
 }
 
 impl Node {
-    pub fn new<S: Into<String>>(name: S, size: u64, children: Vec<Node>) -> Self {
+    pub fn new(name: &str, size: u64, children: Vec<Node>) -> Self {
         Node {
             children: children,
             name: name.into(),

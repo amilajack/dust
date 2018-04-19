@@ -1,11 +1,11 @@
 #[macro_use]
 extern crate clap;
 extern crate assert_cli;
+extern crate ignore;
 
 use self::display::draw_it;
 use clap::{App, AppSettings, Arg};
 use utils::{find_big_ones, get_dir_tree};
-
 
 mod display;
 mod utils;
@@ -14,6 +14,7 @@ mod lib;
 static DEFAULT_NUMBER_OF_LINES: &'static str = "15";
 
 fn main() {
+
     let options = App::new("Dust")
         .setting(AppSettings::TrailingVarArg)
         .arg(
@@ -40,9 +41,9 @@ fn main() {
     let number_of_lines = value_t!(options.value_of("number_of_lines"), usize).unwrap();
     let use_apparent_size = options.is_present("use_apparent_size");
 
-    let (permissions, node_per_top_level_dir) = get_dir_tree(&filenames, use_apparent_size);
-    let slice_it = find_big_ones(&node_per_top_level_dir, number_of_lines);
-    draw_it(permissions, &node_per_top_level_dir, &slice_it);
+    let (permissions, nodes) = get_dir_tree(&filenames, use_apparent_size);
+    let slice_it = find_big_ones(nodes, number_of_lines);
+    draw_it(permissions, &slice_it);
 }
 
 #[cfg(test)]

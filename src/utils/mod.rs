@@ -1,100 +1,135 @@
+use std::collections::HashMap;
 use std::collections::HashSet;
 
-use std::fs;
+use ignore::WalkBuilder;
 
 use std::path::Path;
+use std::path::PathBuf;
 
 use lib::Node;
 mod platform;
 use self::platform::*;
 
-pub fn get_dir_tree(filenames: &Vec<&str>, apparent_size: bool) -> (bool, Vec<Node>) {
+pub fn get_dir_tree(filenames: &Vec<&str>, apparent_size: bool) -> (bool, HashMap<String, u64>) {
     let mut permissions = true;
-    let mut inodes: HashSet<(u64, u64)> = HashSet::new();
-    let mut results = vec![];
+    let mut data = HashMap::new();
     for &b in filenames {
-        let filename = strip_end_slashes(b);
-        let (hp, data) = examine_dir(&Path::new(&filename), apparent_size, &mut inodes);
-        permissions = permissions && hp;
-        match data {
-            Some(d) => results.push(d),
-            None => permissions = false,
+        match Path::new(&b).canonicalize() {
+            Ok(p) => {
+                let hp = examine_dir(&p, apparent_size, &mut data);
+                permissions = permissions && hp;
+            },
+            Err(_) => {}
         }
     }
-    (permissions, results)
+    //println!("{:?}", data);
+    (permissions, data)
 }
 
-fn strip_end_slashes(s: &str) -> String {
-    let mut new_name = String::from(s);
-    while new_name.chars().last() == Some('/') && new_name.len() != 1 {
-        new_name.pop();
-    }
-    new_name
-}
+use ignore::WalkState;
+use std::sync::{Arc, Mutex};
 
 fn examine_dir(
-    sdir: &Path,
+    top_dir: &PathBuf,
     apparent_size: bool,
-    inodes: &mut HashSet<(u64, u64)>,
-) -> (bool, Option<Node>) {
-    match fs::read_dir(sdir) {
-        Ok(file_iter) => {
-            let mut result = vec![];
-            let mut have_permission = true;
-            let mut total_size = 0;
+    data : &mut HashMap<String, u64>
+) -> (bool) {
+    let mut have_permission = true;
+    let paths = Arc::new(Mutex::new(HashMap::new()));
+    let inodes = Arc::new(Mutex::new(HashSet::new()));
 
-            for single_path in file_iter {
-                match single_path {
-                    Ok(d) => {
-                        let file_type = d.file_type().ok();
-                        let maybe_size_and_inode = get_metadata(&d, apparent_size);
+    WalkBuilder::new(top_dir).standard_filters(false).threads(10).build_parallel().run(
+        ||
+        {
+            let paths = paths.clone();
+            let inodes = inodes.clone();
+            let top_dir2 = top_dir.clone();
+            Box::new(move |r| {
+                match r {
+                    Ok(de) => {
+                        let maybe_size_and_inode = get_metadata(&de, apparent_size);
 
-                        match (file_type, maybe_size_and_inode) {
-                            (Some(file_type), Some((size, maybe_inode))) => {
+                        match maybe_size_and_inode {
+                            Some((size, maybe_inode)) => {
                                 if !apparent_size {
                                     if let Some(inode_dev_pair) = maybe_inode {
+                                        let mut inodes = inodes.lock().unwrap();
                                         if inodes.contains(&inode_dev_pair) {
-                                            continue;
+                                            return WalkState::Continue;
                                         }
                                         inodes.insert(inode_dev_pair);
                                     }
                                 }
-                                total_size += size;
 
-                                if d.path().is_dir() && !file_type.is_symlink() {
-                                    let (hp, child) = examine_dir(&d.path(), apparent_size, inodes);
-                                    have_permission = have_permission && hp;
-
-                                    match child {
-                                        Some(c) => {
-                                            total_size += c.size();
-                                            result.push(c);
-                                        }
-                                        None => (),
-                                    }
-                                } else {
-                                    let path_name = d.path().to_string_lossy().to_string();
-                                    result.push(Node::new(path_name, size, vec![]))
+                                let mut paths = paths.lock().unwrap();
+                                let mut e_path = de.path().to_path_buf();
+                                while e_path != top_dir2 {
+                                    let path_name = e_path.to_string_lossy().to_string();
+                                    let s = paths.entry(path_name).or_insert(0);
+                                    *s += size;
+                                    e_path.pop();
                                 }
-                            }
-                            (_, None) => have_permission = false,
-                            (_, _) => (),
+                                let path_name = e_path.to_string_lossy().to_string();
+                                let s = paths.entry(path_name).or_insert(0);
+                                *s += size;
+
+                            },
+                            None => have_permission = false,
                         }
-                    }
-                    Err(_) => (),
-                }
-            }
-            let n = Node::new(sdir.to_string_lossy().to_string(), total_size, result);
-            (have_permission, Some(n))
+                    },
+                    _ => {}
+                };
+                WalkState::Continue
+            })
         }
-        Err(_) => (false, None),
+    );
+    let paths2 = paths.lock().unwrap();
+    for (k,v) in paths2.iter() {
+        data.insert(k.to_string(), *v);
     }
+    (have_permission)
 }
+        /*match entry {
+            Ok(e) => {
+                //println!("{:?}", e.path());
+                let maybe_size_and_inode = get_metadata(&e, apparent_size);
+
+                match maybe_size_and_inode {
+                    Some((size, maybe_inode)) => {
+                        if !apparent_size {
+                            if let Some(inode_dev_pair) = maybe_inode {
+                                if inodes.contains(&inode_dev_pair) {
+                                    continue;
+                                }
+                                inodes.insert(inode_dev_pair);
+                            }
+                        }
+                        let mut e_path = e.path().to_path_buf();
+                        while e_path != *top_dir {
+                            let path_name = e_path.to_string_lossy().to_string();
+                            let s = data.entry(path_name).or_insert(0);
+                            *s += size;
+                            e_path.pop();
+                        }
+
+                    },
+                    None => have_permission = false,
+                }
+            },
+            _ => {}
+        }*/
 
 // We start with a list of root directories - these must be the biggest folders
 // We then repeadedly merge in the children of the biggest directory - Each iteration
 // the next biggest directory's children are merged in.
-pub fn find_big_ones<'a>(l: &'a Vec<Node>, max_to_show: usize) -> Vec<&Node> {
+pub fn find_big_ones<'a>(
+    data: HashMap<String, u64>,
+    max_to_show: usize
+) -> Vec<Node> {
+
+    let mut new_l: Vec<Node> = data.iter().map(|(a, b)| Node::new(a, *b, Vec::new())).collect();
+    new_l.sort();
+/*
     let mut new_l: Vec<&Node> = l.iter().map(|a| a).collect();
     new_l.sort();
 
@@ -112,6 +147,7 @@ pub fn find_big_ones<'a>(l: &'a Vec<Node>, max_to_show: usize) -> Vec<&Node> {
         new_l.extend(b_list);
         new_l.sort();
     }
+    */
 
     if new_l.len() > max_to_show {
         new_l[0..max_to_show + 1].to_vec()

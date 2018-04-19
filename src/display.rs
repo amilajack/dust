@@ -6,21 +6,19 @@ use lib::Node;
 
 static UNITS: [char; 4] = ['T', 'G', 'M', 'K'];
 
-pub fn draw_it(permissions: bool, heads: &Vec<Node>, to_display: &Vec<&Node>) -> () {
+pub fn draw_it(permissions: bool, to_display: &Vec<Node>) -> () {
     if !permissions {
         eprintln!("Did not have permissions for all directories");
     }
 
     for d in to_display {
-        if heads.contains(d) {
-            display_node(d, &to_display, true, "")
-        }
+        display_node(&d, to_display, true, "")
     }
 }
 
 fn display_node<S: Into<String>>(
     node_to_print: &Node,
-    to_display: &Vec<&Node>,
+    to_display: &Vec<Node>,
     is_first: bool,
     indentation_str: S,
 ) {
@@ -70,7 +68,7 @@ fn display_node<S: Into<String>>(
                         }
                     }
                 };
-                display_node(&node, to_display, is_biggest, is.to_string() + tree_chars);
+                display_node(node, to_display, is_biggest, is.to_string() + tree_chars);
                 is_biggest = false;
             }
         }
